@@ -1,5 +1,5 @@
 // Amazon Music Metadata & Download Provider for SpotiFLAC
-// v2.3.8 - Preserves recording ISRCs for cross-catalog matching.
+// v2.3.9 - Resolves cross-catalog links through Songlink web pages.
 // Uses reverse-engineered Amazon Music web API (skill.music.a2z.com).
 
 var CONFIG = {
@@ -10,7 +10,6 @@ var CONFIG = {
   cacheMaxEntries: 500,
   resourceCacheMaxEntries: 500,
   maxResults: 15,
-  songlinkBaseURL: "https://api.song.link/v1-alpha.1/links",
   skillBaseURL: "https://na.mesk.skill.music.a2z.com/api",
   musicBaseURL: "https://music.amazon.com",
   deviceType: "A16ZV8BU3SN1N3",
@@ -21,13 +20,16 @@ var CONFIG = {
 };
 
 var USER_AGENTS = [
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"
 ];
 
 function getRandomUA() {
+  if (utils && typeof utils.randomUserAgent === "function") {
+    var ua = String(utils.randomUserAgent() || "").trim();
+    if (ua) return ua;
+  }
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
@@ -3098,63 +3100,12 @@ function enrichTrack(trackInfo) {
   return enriched;
 }
 
-// ==================== Zarz Moe Resolve ====================
-
-function callZarzMoeResolve(spotifyID) {
-  var data;
-  try {
-    data = signedJSON("POST", "/resolve", { url: "https://open.spotify.com/track/" + spotifyID });
-  } catch (e) {
-    L("warn", "[Amazon] zarz.moe resolve failed:", String(e && e.message ? e.message : e));
-    return null;
-  }
-
-  if (!data || !data.success || !data.songUrls) {
-    L("warn", "[Amazon] zarz.moe resolve returned success=false or no songUrls");
-    return null;
-  }
-  var amazonURL = null;
-  if (data.songUrls.AmazonMusic) {
-    var rawValue = data.songUrls.AmazonMusic;
-    if (typeof rawValue === "string" && rawValue) {
-      amazonURL = rawValue;
-    } else if (Array.isArray(rawValue) && rawValue.length > 0) {
-      amazonURL = rawValue[0];
-    }
-  }
-  if (!amazonURL) {
-    L("info", "[Amazon] zarz.moe resolve: no AmazonMusic link for Spotify ID:", spotifyID);
-    return null;
-  }
-  L("info", "[Amazon] zarz.moe resolve: found Amazon URL:", amazonURL);
-  return amazonURL;
-}
-
 // ==================== SongLink Resolution ====================
 
-function callSongLink(lookupURL) {
-  var res;
-  try {
-    res = fetch(lookupURL, {
-      method: "GET",
-      headers: { "User-Agent": getRandomUA(), "Accept": "application/json" }
-    });
-  } catch (e) {
-    L("error", "[Amazon] SongLink fetch failed:", String(e));
-    return null;
-  }
-  if (!res || !res.ok) {
-    L("warn", "[Amazon] SongLink returned status:", res ? res.status : "no response");
-    return null;
-  }
-  try { return res.json(); } catch (e) {
-    L("error", "[Amazon] SongLink JSON parse failed:", String(e));
-    return null;
-  }
-}
-
-function callSongLinkPage(spotifyID) {
-  var pageURL = "https://song.link/s/" + encodeURIComponent(spotifyID);
+function callSongLinkPage(sourceURL) {
+  if (utils && typeof utils.isDownloadCancelled === "function" && utils.isDownloadCancelled()) throw amazonCancelledError();
+  requireAmazonResolutionBudget(0);
+  var pageURL = "https://song.link/" + encodeURIComponent(sourceURL);
   var res;
   try {
     res = fetch(pageURL, {
@@ -3182,14 +3133,12 @@ function callSongLinkPage(spotifyID) {
 
 function extractSongLinkNextDataJSON(html) {
   if (!html || typeof html !== "string") return null;
-  var startMarker = '<script id="__NEXT_DATA__" type="application/json">';
-  var endMarker = "</script>";
-  var start = html.indexOf(startMarker);
-  if (start < 0) return null;
-  start += startMarker.length;
-  var end = html.indexOf(endMarker, start);
-  if (end < 0) return null;
-  return html.substring(start, end);
+  var scripts = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+  var match;
+  while ((match = scripts.exec(html)) !== null) {
+    if (/(?:^|\s)id\s*=\s*["']__NEXT_DATA__["']/i.test(match[1])) return match[2];
+  }
+  return null;
 }
 
 function extractSongLinkPageLinks(html) {
@@ -3215,27 +3164,21 @@ function extractSongLinkPageLinks(html) {
   }
 }
 
-function resolveAmazonURLFromSpotifyPage(spotifyID) {
-  var html = callSongLinkPage(spotifyID);
+function resolveAmazonURLFromPage(sourceURL) {
+  var html = callSongLinkPage(sourceURL);
   if (!html) return null;
   var linksByPlatform = extractSongLinkPageLinks(html);
   if (!linksByPlatform || !linksByPlatform.amazonMusic || !linksByPlatform.amazonMusic.url) {
-    L("warn", "[Amazon] SongLink page had no Amazon link for Spotify ID:", spotifyID);
+    L("warn", "[Amazon] SongLink page had no Amazon link for:", sourceURL);
     return null;
   }
   L("info", "[Amazon] Found Amazon URL via SongLink page:", linksByPlatform.amazonMusic.url);
   return linksByPlatform.amazonMusic.url;
 }
 
-function extractAmazonURLFromSongLink(data) {
-  if (data && data.linksByPlatform && data.linksByPlatform.amazonMusic) {
-    var u = data.linksByPlatform.amazonMusic.url;
-    if (u) return u;
-  }
-  return null;
-}
-
 function callSongstatsForAmazon(isrc) {
+  if (utils && typeof utils.isDownloadCancelled === "function" && utils.isDownloadCancelled()) throw amazonCancelledError();
+  requireAmazonResolutionBudget(0);
   var url = "https://songstats.com/" + encodeURIComponent(isrc.toUpperCase().trim()) + "?ref=ISRCFinder";
   var res;
   try {
@@ -3305,17 +3248,30 @@ function isLikelySpotifyId(id) {
 }
 
 function resolveAmazonURL(isrc, spotifyID, deezerID) {
-  var country = String((_session && _session.musicTerritory) || CONFIG.musicTerritory || "US").toUpperCase();
-  // Deezer first: the app resolves a Deezer ID from the ISRC reliably and
-  // SongLink maps it to Amazon without depending on the zarz.moe resolve
-  // endpoint, which can be slow or down and otherwise burns the whole timeout.
+  if (utils && typeof utils.isDownloadCancelled === "function" && utils.isDownloadCancelled()) throw amazonCancelledError();
+  requireAmazonResolutionBudget(0);
+  deezerID = String(deezerID || "").trim();
+  if (!/^[1-9][0-9]*$/.test(deezerID)) deezerID = "";
+  // Like the native resolver, translate an ISRC to a catalog URL first.
+  if (!deezerID && isrc) {
+    try {
+      var response = fetch("https://api.deezer.com/track/isrc:" + encodeURIComponent(String(isrc).trim()), {
+        method: "GET",
+        headers: { "User-Agent": getRandomUA(), "Accept": "application/json" }
+      });
+      var track = response && response.ok ? response.json() : null;
+      var id = String(track && track.id || "");
+      if (/^[1-9][0-9]*$/.test(id)) deezerID = id;
+    } catch (e) {
+      L("warn", "[Amazon] Deezer ISRC lookup failed:", String(e));
+    }
+  }
   if (deezerID) {
     L("info", "[Amazon] Resolving via Deezer ID:", deezerID);
     var deezerURL = "https://www.deezer.com/track/" + deezerID;
-    var data = callSongLink(CONFIG.songlinkBaseURL + "?url=" + encodeURIComponent(deezerURL) + "&userCountry=" + encodeURIComponent(country));
-    var url = extractAmazonURLFromSongLink(data);
+    var url = resolveAmazonURLFromPage(deezerURL);
     if (url) {
-      var acceptedDeezerURL = acceptResolvedAmazonTrackURL(url, "Deezer SongLink");
+      var acceptedDeezerURL = acceptResolvedAmazonTrackURL(url, "Deezer SongLink page");
       if (acceptedDeezerURL) {
         L("info", "[Amazon] Found Amazon URL via Deezer:", acceptedDeezerURL);
         return acceptedDeezerURL;
@@ -3327,39 +3283,16 @@ function resolveAmazonURL(isrc, spotifyID, deezerID) {
   // produces an invalid Spotify URL and poisons every Spotify-based lookup.
   if (isLikelySpotifyId(spotifyID)) {
     L("info", "[Amazon] Resolving via Spotify ID:", spotifyID);
-    var url = callZarzMoeResolve(spotifyID);
-    var acceptedURL = acceptResolvedAmazonTrackURL(url, "zarz.moe resolve");
+    var spotifyURL = "https://open.spotify.com/track/" + spotifyID.trim();
+    var url = resolveAmazonURLFromPage(spotifyURL);
+    var acceptedURL = acceptResolvedAmazonTrackURL(url, "Spotify SongLink page");
     if (acceptedURL) return acceptedURL;
-    L("info", "[Amazon] zarz.moe failed for Spotify ID, falling back to SongLink page");
-    url = resolveAmazonURLFromSpotifyPage(spotifyID);
-    acceptedURL = acceptResolvedAmazonTrackURL(url, "Spotify SongLink page");
-    if (acceptedURL) return acceptedURL;
-    var spotifyURL = "https://open.spotify.com/track/" + spotifyID;
-    var data = callSongLink(CONFIG.songlinkBaseURL + "?url=" + encodeURIComponent(spotifyURL) + "&userCountry=" + encodeURIComponent(country));
-    url = extractAmazonURLFromSongLink(data);
-    if (url) {
-      acceptedURL = acceptResolvedAmazonTrackURL(url, "Spotify SongLink API");
-      if (acceptedURL) {
-        L("info", "[Amazon] Found Amazon URL via Spotify:", acceptedURL);
-        return acceptedURL;
-      }
-    }
   } else if (spotifyID) {
     L("info", "[Amazon] Ignoring non-Spotify ID in spotify field:", spotifyID);
   }
   if (isrc) {
-    L("info", "[Amazon] Resolving via ISRC:", isrc);
-    var data = callSongLink(CONFIG.songlinkBaseURL + "?isrc=" + encodeURIComponent(isrc) + "&userCountry=" + encodeURIComponent(country));
-    var url = extractAmazonURLFromSongLink(data);
-    if (url) {
-      var acceptedISRCURL = acceptResolvedAmazonTrackURL(url, "ISRC SongLink API");
-      if (acceptedISRCURL) {
-        L("info", "[Amazon] Found Amazon URL via ISRC:", acceptedISRCURL);
-        return acceptedISRCURL;
-      }
-    }
-    L("info", "[Amazon] SongLink ISRC failed, trying Songstats for ISRC:", isrc);
-    url = callSongstatsForAmazon(isrc);
+    L("info", "[Amazon] Trying Songstats for ISRC:", isrc);
+    var url = callSongstatsForAmazon(isrc);
     var acceptedSongstatsURL = acceptResolvedAmazonTrackURL(url, "Songstats");
     if (acceptedSongstatsURL) return acceptedSongstatsURL;
   }
@@ -3789,7 +3722,7 @@ function completeGrant() {
 
 registerExtension({
   initialize: function() {
-    L("info", "[Amazon] Extension v2.3.8 init");
+    L("info", "[Amazon] Extension v2.3.9 init");
     initSession();
     return true;
   },
@@ -3873,7 +3806,7 @@ registerExtension({
   },
 
   download: function(trackID, quality, outputPath, onProgress, options) {
-    L("info", "[Amazon] download called:", trackID, quality, "extension: 2.3.8");
+    L("info", "[Amazon] download called:", trackID, quality, "extension: 2.3.9");
 
     // trackID bisa berupa:
     // - ASIN langsung (dari handleUrl/getAlbum flow, atau checkAvailability)

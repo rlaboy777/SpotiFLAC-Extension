@@ -25,10 +25,10 @@
       "id": "amazon",
       "name": "amazon",
       "display_name": "Amazon Music",
-      "version": "2.3.8",
+      "version": "2.3.9",
       "description": "Amazon Music metadata & download provider for SpotiFLAC Mobile. Includes complete Amazon Web release metadata, original-resolution artwork, lossless audio, and Dolby Atmos.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/amzn.sflx",
-      "sha256": "ca7843db714869baa76011dcc6f357f15c021739927ca54b30d25e93e985c20e",
+      "sha256": "d33d6c86381d904491c63852ccd916c31dbbd2a0d7eada1cec47f24b3f84a4a3",
       "category": "download",
       "tags": [
         "amazon",
@@ -38,7 +38,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-09-06T00:00:00Z",
+      "updated_at": "2026-09-14T00:00:00Z",
       "min_app_version": "4.9.1"
     },
     {
@@ -125,10 +125,10 @@
       "id": "qobuz-web",
       "name": "qobuz-web",
       "display_name": "Qobuz",
-      "version": "1.2.15",
+      "version": "1.2.18",
       "description": "Qobuz metadata and download provider for SpotiFLAC Mobile with resilient album search and track recovery, complete release metadata, credits, multi-disc totals, and original artwork.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/qobuz-web.sflx",
-      "sha256": "07b38953ce1b2bf5306d6b49450d0dd319c4a5f803a6911c28a557c8e3a0c280",
+      "sha256": "272570d4b03fd4286c80eaacca34da0deb83d725b590eb1d583d10daef4f64bb",
       "category": "download",
       "tags": [
         "qobuz",
@@ -138,7 +138,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-09-06T00:00:00Z",
+      "updated_at": "2026-09-15T00:00:00Z",
       "min_app_version": "4.9.1"
     },
     {

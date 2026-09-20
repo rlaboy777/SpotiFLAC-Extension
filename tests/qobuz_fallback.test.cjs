@@ -328,3 +328,172 @@ test('album recovery rejects a different recording and propagates verification',
   c.fetchAlbumRaw = () => { throw new Error('VERIFY_REQUIRED'); };
   assert.throws(() => c.checkAvailability('', 'Signal - Remix', 'Artist', options), /VERIFY_REQUIRED/);
 });
+
+test('album recovery qualifies common album titles with the requested artist', () => {
+  const c = runtime();
+  sources(c, () => []);
+  const queries = [];
+  c.searchAlbumsViaAPI = (query, limit) => {
+    queries.push([query, limit]);
+    return query === 'Twelve Bilal Saeed' ? [{ id: 'matching-album' }] :
+      [{ id: 'unrelated-one' }, { id: 'unrelated-two' }, { id: 'unrelated-three' }];
+  };
+  c.fetchAlbumRaw = id => {
+    assert.equal(id, 'matching-album');
+    return { id, tracks: { items: [track('411608895', {
+      title: 'Ku Ku', performer: { name: 'Bilal Saeed' }, isrc: 'GBUQQ1262402', duration: 202,
+    })] } };
+  };
+  const result = c.checkAvailability('GBUQQ1262402', 'Ku Ku (feat. Dr Zeus & Young Fateh)', 'Bilal Saeed', {
+    duration_ms: 202000, track: { album_name: 'Twelve' },
+  });
+  assert.equal(result.track_id, '411608895');
+  assert.deepEqual(queries, [['Twelve Bilal Saeed', 3]]);
+});
+
+test('qualified album misses retain title fallback and separate cache entries', () => {
+  const c = runtime();
+  sources(c, () => []);
+  const queries = [];
+  c.searchAlbumsViaAPI = query => {
+    queries.push(query);
+    return query === 'Collection' ? [{ id: 'album' }] : [];
+  };
+  c.fetchAlbumRaw = id => ({ id, tracks: { items: [track('2')] } });
+  const options = { duration_ms: 180000, track: { album_name: 'Collection' } };
+  assert.equal(c.checkAvailability('USAAA0000001', 'Signal', 'Artist', options).track_id, '2');
+  assert.equal(c.checkAvailability('USAAA0000001', 'Signal', 'Artist', options).track_id, '2');
+  assert.deepEqual(queries, ['Collection Artist', 'Collection']);
+  c.checkAvailability('', 'Signal', 'Someone Else', options);
+  assert.equal(queries.at(-1), 'Collection Someone Else');
+});
+
+test('album recovery handles featured artists without weakening track validation', () => {
+  const c = runtime();
+  sources(c, () => []);
+  const queries = [];
+  c.searchAlbumsViaAPI = query => {
+    queries.push(query);
+    return query === 'Twelve bilal saeed' ? [{ id: 'album' }] : [];
+  };
+  c.fetchAlbumRaw = id => ({ id, tracks: { items: [
+    track('411608897', { title: '2 Number', performer: { name: 'Bilal Saeed' }, isrc: 'GBUQQ1262404', duration: 243 }),
+    track('411608903', { title: 'Dil', performer: { name: 'Bilal Saeed' }, isrc: 'GBUQQ1262410', duration: 192 }),
+  ] } });
+  const artist = 'Bilal Saeed & Amrinder Gill';
+  const options = duration => ({ duration_ms: duration, track: { album_name: 'Twelve' } });
+  assert.equal(c.checkAvailability('GBUQQ1262404', '2 Number (feat. Dr Zeus & Young Fateh)', artist, options(243150)).track_id, '411608897');
+  assert.equal(c.checkAvailability('GBUQQ1262410', 'Dil', artist, options(192006)).track_id, '411608903');
+  assert.deepEqual(queries, ['Twelve Bilal Saeed & Amrinder Gill', 'Twelve bilal saeed']);
+  assert.equal(c.checkAvailability('', 'Dil - Remix', artist, options(192006)).available, false);
+  assert.equal(c.checkAvailability('', 'Dil', artist, options(240000)).available, false);
+  assert.equal(c.checkAvailability('', 'Dil', 'Someone Else', options(192006)).available, false);
+});
+
+test('unmatched or failed qualified album searches retain bounded title recovery', () => {
+  for (const fails of [false, true]) {
+    const c = runtime();
+    sources(c, () => []);
+    const queries = [];
+    const hydrated = [];
+    c.searchAlbumsViaAPI = (query, limit) => {
+      queries.push([query, limit]);
+      if (query === 'Collection') return [{ id: 'matching' }];
+      if (fails) throw new Error('HTTP 503');
+      return Array.from({ length: 8 }, (_, id) => ({ id: String(id) }));
+    };
+    c.fetchAlbumRaw = id => {
+      hydrated.push(id);
+      return { id, tracks: { items: [track(id, id === 'matching' ? {} : { isrc: '', duration: 280 })] } };
+    };
+    const result = c.checkAvailability('USAAA0000001', 'Signal', 'Artist', {
+      duration_ms: 180000, track: { album_name: 'Collection' },
+    });
+    assert.equal(result.track_id, 'matching');
+    assert.deepEqual(queries, [['Collection Artist', 3], ['Collection', 3]]);
+    assert.deepEqual(hydrated, fails ? ['matching'] : ['0', '1', '2', 'matching']);
+  }
+});
+
+test('empty album searches stay cached without repeating requests', () => {
+  const c = runtime();
+  sources(c, () => []);
+  const queries = [];
+  c.searchAlbumsViaAPI = query => { queries.push(query); return []; };
+  c.fetchAlbumRaw = () => assert.fail('empty search must not hydrate albums');
+  const options = { duration_ms: 180000, track: { album_name: 'Collection' } };
+  assert.equal(c.checkAvailability('USAAA0000001', 'Signal', 'Artist', options).available, false);
+  assert.equal(c.checkAvailability('USAAA0000001', 'Signal', 'Artist', options).available, false);
+  assert.deepEqual(queries, ['Collection Artist', 'Collection']);
+});
+
+test('source album identity outranks an earlier title match from another release', () => {
+  const c = runtime();
+  sources(c, () => [track('other-release', { isrc: 'OTHER', album: { title: 'Compilation' } })]);
+  const queries = [];
+  c.searchAlbumsViaAPI = query => { queries.push(query); return [{ id: 'source' }]; };
+  c.fetchAlbumRaw = () => ({ id: 'source', title: 'Collection', tracks: { items: [track('original')] } });
+  const result = c.checkAvailability('USAAA0000001', 'Signal', 'Artist', {
+    duration_ms: 181000, track: { album_name: 'Collection' },
+  });
+  assert.equal(result.track_id, 'original');
+  assert.equal(result.prepared_context.raw_track.isrc, 'USAAA0000001');
+  assert.deepEqual(queries, ['Collection Artist']);
+});
+
+test('exact search identity avoids extra source album requests', () => {
+  const c = runtime();
+  sources(c, () => [track('exact')]);
+  c.searchAlbumsViaAPI = () => assert.fail('exact match should finish immediately');
+  assert.equal(c.checkAvailability('USAAA0000001', 'Signal', 'Artist', {
+    duration_ms: 180000, track: { album_name: 'Collection' },
+  }).track_id, 'exact');
+});
+
+test('unavailable source album retains a validated alternate but never hides verification or cancellation', () => {
+  for (const mode of ['empty', 'error', 'verification', 'cancel']) {
+    const c = runtime();
+    sources(c, () => [track('alternate', { isrc: 'OTHER' })]);
+    let cancelled = false;
+    c.utils.isDownloadCancelled = () => cancelled;
+    c.searchAlbumsViaAPI = () => {
+      if (mode === 'verification') throw new Error('VERIFY_REQUIRED');
+      if (mode === 'error') throw new Error('HTTP 503');
+      cancelled = mode === 'cancel';
+      return [];
+    };
+    const run = () => c.checkAvailability('USAAA0000001', 'Signal', 'Artist', {
+      duration_ms: 180000, track: { album_name: 'Collection' },
+    });
+    if (mode === 'verification') assert.throws(run, /VERIFY_REQUIRED/);
+    else if (mode === 'cancel') assert.match(run().reason, /cancelled/);
+    else assert.equal(run().track_id, 'alternate');
+  }
+});
+
+test('album recovery stops after cancellation during search or hydration', () => {
+  for (const stage of ['search', 'hydration']) {
+    const c = runtime();
+    sources(c, () => []);
+    let cancelled = false;
+    let searches = 0;
+    let hydrated = 0;
+    c.utils.isDownloadCancelled = () => cancelled;
+    c.searchAlbumsViaAPI = () => {
+      searches++;
+      cancelled = stage === 'search';
+      return [{ id: 'first' }, { id: 'second' }];
+    };
+    c.fetchAlbumRaw = id => {
+      hydrated++;
+      cancelled = true;
+      return { id, tracks: { items: [track('1')] } };
+    };
+    const result = c.checkAvailability('USAAA0000001', 'Signal', 'Artist', {
+      duration_ms: 180000, track: { album_name: 'Collection' },
+    });
+    assert.match(result.reason, /cancelled/);
+    assert.equal(searches, 1);
+    assert.equal(hydrated, stage === 'search' ? 0 : 1);
+  }
+});
