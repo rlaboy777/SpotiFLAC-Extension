@@ -7,7 +7,6 @@ var CONFIG = {
   locale: "en_US",
   deviceType: "BROWSER",
   mirrorBaseURLs: [],
-  maxArtistAlbums: 100,
   maxAlbumItems: 1000,
   maxPlaylistTracks: 500,
   pageSize: 50,
@@ -2087,8 +2086,65 @@ function getAlbum(albumID) {
   }
 }
 
+function appendArtistAlbums(albums, items, artistID, fallbackType, seen) {
+  for (var i = 0; i < items.length; i++) {
+    if (!albumBelongsToArtist(items[i], artistID)) continue;
+    var album = formatArtistAlbum(items[i], fallbackType);
+    if (!album || !album.id || seen[album.id]) continue;
+    seen[album.id] = true;
+    albums.push(album);
+  }
+}
+
+function artistAlbumsCursor(artistID, pages) {
+  if (!pages.length) return "";
+  return "artist-albums:" + encodeURIComponent(JSON.stringify({ id: artistID, pages: pages }));
+}
+
+function fetchArtistAlbumsContinuation(cursor) {
+  var state = JSON.parse(decodeURIComponent(cursor.slice("artist-albums:".length)));
+  if (!state || !/^\d+$/.test(String(state.id || "")) || !Array.isArray(state.pages) || !state.pages.length) {
+    throw new Error("Invalid artist albums cursor");
+  }
+  var pending = state.pages;
+  var current = pending[0];
+  if (!current || typeof current.path !== "string" || !current.path.trim() ||
+      !Number.isInteger(current.offset) || current.offset < 0) {
+    throw new Error("Invalid artist albums page");
+  }
+  // One provider request per app scroll request. The remaining module cursors
+  // travel with the result, so pagination survives cache expiry or app restart.
+  var page = fetchArtistAlbumsPage(current.path, current.offset, CONFIG.pageSize);
+  var items = page.items || [];
+  var albums = [];
+  appendArtistAlbums(albums, items, state.id, current.type, {});
+  var offset = current.offset + items.length;
+  var total = Number(page.totalNumberOfItems === undefined
+    ? current.total : page.totalNumberOfItems);
+  if (!items.length || offset >= total) {
+    pending.shift();
+  } else {
+    current.offset = offset;
+    current.total = total;
+  }
+  return {
+    id: withPrefix(state.id),
+    albums: albums,
+    albums_next: artistAlbumsCursor(state.id, pending),
+    provider_id: "tidal-web",
+    item_type: "artist"
+  };
+}
+
 function getArtist(artistID) {
   try {
+    var resourceID = String(artistID || "").trim();
+    var cacheKey = "artist:" + CONFIG.countryCode + ":" + CONFIG.locale + ":" + resourceID;
+    var cached = metadataCacheGet(cacheKey);
+    if (cached) return cached;
+    if (resourceID.indexOf("artist-albums:") === 0) {
+      return metadataCacheSet(cacheKey, fetchArtistAlbumsContinuation(resourceID));
+    }
     var page = fetchArtistPage(artistID);
     var headerModule = findModule(page, "ARTIST_HEADER");
     if (!headerModule || !headerModule.artist) {
@@ -2099,6 +2155,8 @@ function getArtist(artistID) {
     var targetArtistID = String(headerModule.artist.id || "");
     var albums = [];
     var seen = {};
+    var pending = [];
+    var seenPaths = {};
 
     if (page.rows) {
       for (var rowIndex = 0; rowIndex < page.rows.length; rowIndex++) {
@@ -2110,41 +2168,21 @@ function getArtist(artistID) {
 
           var fallbackType = artistAlbumTypeFromModuleTitle(module.title);
           var items = module.pagedList.items || [];
-          for (var i = 0; i < items.length; i++) {
-            if (!albumBelongsToArtist(items[i], targetArtistID)) continue;
-            var mapped = formatArtistAlbum(items[i], fallbackType);
-            if (!mapped || !mapped.id || seen[mapped.id]) continue;
-            seen[mapped.id] = true;
-            albums.push(mapped);
-          }
-
-          var pageSize = Number(module.pagedList.limit || CONFIG.pageSize);
-          if (!pageSize || pageSize <= 0) pageSize = CONFIG.pageSize;
-          var offset = items.length;
-          while (offset < Number(module.pagedList.totalNumberOfItems || 0) &&
-              String(module.pagedList.dataApiPath || "").trim() &&
-              albums.length < CONFIG.maxArtistAlbums) {
-            var albumPage = fetchArtistAlbumsPage(module.pagedList.dataApiPath, offset, pageSize);
-            var pageItems = albumPage.items || [];
-            for (var j = 0; j < pageItems.length; j++) {
-              if (!albumBelongsToArtist(pageItems[j], targetArtistID)) continue;
-              var release = formatArtistAlbum(pageItems[j], fallbackType);
-              if (!release || !release.id || seen[release.id]) continue;
-              seen[release.id] = true;
-              albums.push(release);
-              if (albums.length >= CONFIG.maxArtistAlbums) break;
-            }
-            if (!pageItems.length || offset + pageItems.length >= Number(albumPage.totalNumberOfItems || 0)) {
-              break;
-            }
-            offset += pageItems.length;
+          appendArtistAlbums(albums, items, targetArtistID, fallbackType, seen);
+          var offset = Number(module.pagedList.offset || 0) + items.length;
+          var total = Number(module.pagedList.totalNumberOfItems || 0);
+          var dataPath = String(module.pagedList.dataApiPath || "").trim();
+          if (offset < total && dataPath && !seenPaths[dataPath]) {
+            seenPaths[dataPath] = true;
+            pending.push({ path: dataPath, offset: offset, total: total, type: fallbackType });
           }
         }
       }
     }
 
     artistInfo.albums = albums;
-    return artistInfo;
+    artistInfo.albums_next = artistAlbumsCursor(targetArtistID, pending);
+    return metadataCacheSet(cacheKey, artistInfo);
   } catch (e) {
     log.error("[TidalWeb] getArtist failed:", e.message);
     return null;

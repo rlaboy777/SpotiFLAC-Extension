@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-06T00:00:00Z",
+  "updated_at": "2026-09-20T00:00:00Z",
   "extensions": [
     {
       "id": "spotify-web",
@@ -45,10 +45,10 @@
       "id": "apple-music",
       "name": "apple-music",
       "display_name": "Apple Music",
-      "version": "1.4.4",
+      "version": "1.4.7",
       "description": "Apple Music metadata and lyrics provider for SpotiFLAC Mobile with guarded track matching, bounded caching, resilient requests, and complete release metadata.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/apple-music.sflx",
-      "sha256": "12b4823329e6d441b69722a1576fef0857b8ae342334c7618f5a2474921c3f19",
+      "sha256": "02d2b85d3ab4d495d54aa15899d62cf99ee893e1f96e8190edb0d2a1c8ec06b2",
       "category": "integration",
       "tags": [
         "apple",
@@ -57,7 +57,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-08-29T00:00:00Z",
+      "updated_at": "2026-09-20T00:00:00Z",
       "min_app_version": "4.2.3"
     },
     {
@@ -145,10 +145,10 @@
       "id": "tidal-web",
       "name": "tidal-web",
       "display_name": "Tidal",
-      "version": "1.2.6",
+      "version": "1.2.7",
       "description": "TIDAL metadata, search, and download provider for SpotiFLAC Mobile with complete release, credits, explicit, and disc metadata from TIDAL Web.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/tidal-web.sflx",
-      "sha256": "c0422ec40a8b41555e03ecbf7c6d9911a06d6a89eea418b64ca930e96794bd09",
+      "sha256": "83e3aa93c59a8e16fa3da85d972cb8ba95e4f29992bd756b18f61269714080db",
       "category": "download",
       "tags": [
         "tidal",
@@ -158,7 +158,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-09-06T00:00:00Z",
+      "updated_at": "2026-09-20T00:00:00Z",
       "min_app_version": "4.9.0"
     }
   ]
