@@ -1,6 +1,6 @@
 // ============================================
 // Apple Music Extension for SpotiFLAC Mobile
-// Version: 1.4.7
+// Version: 1.4.8
 //
 // Uses Apple Music's public catalog API (amp-api)
 // to fetch metadata including ISRC. No login required.
@@ -2431,6 +2431,98 @@ function findTrackId(trackName, artistName, albumName, durationSec) {
 }
 
 // ============================================
+// PUBLIC NEW FEED
+// ============================================
+
+function newFeedArtwork(artwork, featured) {
+  var dictionary = artwork && (artwork.dictionary || artwork);
+  if (!dictionary || typeof dictionary.url !== "string") return "";
+  return dictionary.url.replace("{w}", featured ? "960" : "600")
+    .replace("{h}", featured ? "640" : "600")
+    .replace("{c}", artwork.cropStyle || "sr").replace("{f}", "jpg");
+}
+
+function newFeedLinkText(links) {
+  if (!Array.isArray(links)) return "";
+  return links.map(function (link) { return link && link.title || ""; }).filter(Boolean).join(", ");
+}
+
+function parseNewFeed(html) {
+  // Read Apple's public page model once; no per-card catalog requests or user token.
+  var match = /<script\b[^>]*\bid=["']serialized-server-data["'][^>]*>([\s\S]*?)<\/script>/i.exec(html);
+  if (!match) throw new Error("Apple Music New page data is unavailable");
+  var payload = JSON.parse(match[1]);
+  var pages = Array.isArray(payload) ? payload : payload.data;
+  var page = Array.isArray(pages) && pages.find(function (entry) {
+    return entry && entry.data && Array.isArray(entry.data.sections);
+  });
+  if (!page) throw new Error("Apple Music New page format is unsupported");
+  var sections = [];
+  page.data.sections.slice(0, 30).forEach(function (section) {
+    if (!section || !Array.isArray(section.items)) return;
+    var featured = section.itemKind === "flowcaseLockup";
+    var seen = Object.create(null);
+    var items = [];
+    section.items.slice(0, 40).forEach(function (item) {
+      if (!item || item.isDisabled) return;
+      var descriptor = item.contentDescriptor ||
+        (item.segue && item.segue.destination && item.segue.destination.contentDescriptor);
+      if (!descriptor) return;
+      var type = descriptor.kind === "song" ? "track" : descriptor.kind;
+      // Radio and video links cannot be opened by the app's music detail routes.
+      if (["track", "album", "playlist", "artist"].indexOf(type) < 0) return;
+      var id = descriptor.identifiers && descriptor.identifiers.storeAdamID;
+      var name = item.title || newFeedLinkText(item.titleLinks);
+      if (!id || !name || seen[type + ":" + id]) return;
+      seen[type + ":" + id] = true;
+      var uri = descriptor.url || "";
+      var albumMatch = type === "track" && /\/album\/[^/?]+\/(\d+)/.exec(uri);
+      items.push({
+        id: String(id), uri: uri, type: type, name: name,
+        artists: item.subtitle || item.artistName || newFeedLinkText(item.subtitleLinks),
+        cover_url: newFeedArtwork(item.coverArtwork || item.artwork, false),
+        featured_cover_url: featured ? newFeedArtwork(item.artwork || item.coverArtwork, true) : "",
+        heading: item.heading || "",
+        description: item.description || "",
+        album_id: albumMatch ? albumMatch[1] : "",
+        provider_id: "apple-music"
+      });
+    });
+    if (!items.length) return;
+    var header = section.header && section.header.item;
+    sections.push({
+      uri: String(section.id || "new-" + sections.length),
+      title: header && header.titleLink && header.titleLink.title || (featured ? "New" : "Apple Music"),
+      layout: featured ? "featured" : "shelf",
+      items: items
+    });
+  });
+  if (!sections.length) throw new Error("Apple Music New page contains no supported music items");
+  return { success: true, greeting: "", sections: sections };
+}
+
+function getHomeFeed() {
+  var key = scopedCacheKey("home", "new");
+  var cached = cacheGet(key);
+  if (cached) return cached;
+  try {
+    if (operationCancelled()) throw new Error("request cancelled");
+    var storefront = /^[a-z]{2}$/i.test(state.storefront) ? state.storefront.toLowerCase() : "us";
+    var response = http.get("https://music.apple.com/" + storefront + "/new", {
+      "User-Agent": utils.randomUserAgent(),
+      "Accept": "text/html"
+    });
+    if (!response || response.error || response.statusCode !== 200) {
+      throw new Error("Apple Music New request failed: " +
+        (response && (response.error || "HTTP " + response.statusCode) || "no response"));
+    }
+    return cacheSet(key, parseNewFeed(response.body), METADATA_CACHE_TTL_MS);
+  } catch (error) {
+    return { success: false, error: String(error.message || error), sections: [] };
+  }
+}
+
+// ============================================
 // REGISTER EXTENSION
 // ============================================
 
@@ -2443,6 +2535,7 @@ registerExtension({
   getAlbum: getAlbum,
   getArtist: getArtist,
   getPlaylist: getPlaylist,
+  getHomeFeed: getHomeFeed,
   searchTracks: searchTracks,
   enrichTrack: enrichTrack,
   fetchLyrics: fetchLyrics

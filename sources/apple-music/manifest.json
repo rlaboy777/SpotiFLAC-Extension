@@ -1,7 +1,7 @@
 {
   "name": "apple-music",
   "displayName": "Apple Music",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Apple Music metadata and lyrics provider for SpotiFLAC Mobile with guarded track matching, bounded caching, resilient requests, and complete release metadata.",
   "homepage": "https://github.com/zarzet/SpotiFLAC-Mobile",
   "type": [
@@ -11,7 +11,7 @@
   "minAppVersion": "4.2.3",
   "skipMetadataEnrichment": false,
   "capabilities": {
-    "homeFeed": false,
+    "homeFeed": true,
     "browseCategories": false,
     "shareUrlTemplates": {
       "track": "https://music.apple.com/us/song/{id}",
