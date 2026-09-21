@@ -1,6 +1,6 @@
 // ============================================
 // Apple Music Extension for SpotiFLAC Mobile
-// Version: 1.4.8
+// Version: 1.4.9
 //
 // Uses Apple Music's public catalog API (amp-api)
 // to fetch metadata including ISRC. No login required.
@@ -2483,6 +2483,7 @@ function parseNewFeed(html) {
         cover_url: newFeedArtwork(item.coverArtwork || item.artwork, false),
         featured_cover_url: featured ? newFeedArtwork(item.artwork || item.coverArtwork, true) : "",
         heading: item.heading || "",
+        explicit: typeof item.showExplicitBadge === "boolean" ? item.showExplicitBadge : null,
         description: item.description || "",
         album_id: albumMatch ? albumMatch[1] : "",
         provider_id: "apple-music"
@@ -2495,6 +2496,19 @@ function parseNewFeed(html) {
       title: header && header.titleLink && header.titleLink.title || (featured ? "New" : "Apple Music"),
       layout: featured ? "featured" : "shelf",
       items: items
+    });
+  });
+  // Hero cards omit badges; reuse flags from matching album/song shelf entries.
+  var explicitByItem = Object.create(null);
+  sections.forEach(function (section) {
+    section.items.forEach(function (item) {
+      if (item.explicit !== null) explicitByItem[item.type + ":" + item.id] = item.explicit;
+    });
+  });
+  sections.forEach(function (section) {
+    section.items.forEach(function (item) {
+      var flag = explicitByItem[item.type + ":" + item.id];
+      if (item.explicit === null && typeof flag === "boolean") item.explicit = flag;
     });
   });
   if (!sections.length) throw new Error("Apple Music New page contains no supported music items");

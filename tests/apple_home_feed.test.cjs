@@ -82,6 +82,22 @@ test('storefront changes fetch an independent feed without authentication', () =
   assert.deepEqual(calls, ['https://music.apple.com/id/new', 'https://music.apple.com/gb/new']);
 });
 
+test('explicit flags reach songs, albums and matching heroes without treating unknown as clean', () => {
+  const { registered } = runtime(page([
+    { itemKind: 'flowcaseLockup', items: [item('album', '123'), item('playlist', 'pl.unknown')] },
+    { items: [
+      item('album', '123', { showExplicitBadge: true }),
+      item('song', 'explicit', { showExplicitBadge: true }),
+      item('song', 'clean', { showExplicitBadge: false }),
+    ] },
+  ]));
+  const sections = registered.getHomeFeed().sections;
+  assert.equal(sections[0].items[0].explicit, true);
+  assert.equal(sections[0].items[1].explicit, null);
+  assert.equal(sections[1].items[1].explicit, true);
+  assert.equal(sections[1].items[2].explicit, false);
+});
+
 for (const body of ['<html>Unavailable</html>', page([]),
   '<script id="serialized-server-data">invalid</script>']) {
   test(`invalid feed returns a recoverable error: ${body.slice(0, 30)}`, () => {
