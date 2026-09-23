@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-21T00:00:00Z",
+  "updated_at": "2026-09-23T00:00:00Z",
   "extensions": [
     {
       "id": "spotify-web",
@@ -25,10 +25,10 @@
       "id": "amazon",
       "name": "amazon",
       "display_name": "Amazon Music",
-      "version": "2.3.9",
+      "version": "2.3.11",
       "description": "Amazon Music metadata & download provider for SpotiFLAC Mobile. Includes complete Amazon Web release metadata, original-resolution artwork, lossless audio, and Dolby Atmos.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/amzn.sflx",
-      "sha256": "d33d6c86381d904491c63852ccd916c31dbbd2a0d7eada1cec47f24b3f84a4a3",
+      "sha256": "39ec454b07b5d881aa844ab6f2aa5eed6cff120bdecf49d10bd2386355de3329",
       "category": "download",
       "tags": [
         "amazon",
@@ -38,7 +38,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-09-14T00:00:00Z",
+      "updated_at": "2026-09-23T00:00:00Z",
       "min_app_version": "4.9.1"
     },
     {

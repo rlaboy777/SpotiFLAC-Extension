@@ -46,8 +46,11 @@ for (const domain of ['com', 'in', 'co.jp', 'co.uk', 'de', 'fr', 'it', 'es', 'co
     const seen = [];
     context.fetch = (url, options) => {
       seen.push({ url, options });
-      if (url.endsWith('/config.json')) {
-        return { ok: true, status: 200, json: () => ({ deviceId: 'fixture', sessionId: 'fixture' }) };
+      if (new URL(url).pathname === '/config.json') {
+        return { ok: true, status: 200, json: () => ({
+          deviceId: 'fixture', sessionId: 'fixture',
+          csrf: { token: 'fixture-token', ts: '1234567890', rnd: '987654321' },
+        }) };
       }
       const headers = JSON.parse(JSON.parse(options.body).headers);
       assert.equal(headers['x-amzn-music-domain'], 'music.amazon.com');
@@ -60,7 +63,8 @@ for (const domain of ['com', 'in', 'co.jp', 'co.uk', 'de', 'fr', 'it', 'es', 'co
     assert.equal(result.album.id, resolvedAlbum);
     assert.equal(result.tracks[0].id, resolvedTrack);
     assert.equal(result.tracks[0].album_id, resolvedAlbum);
-    assert.equal(seen[0].url, 'https://music.amazon.com/config.json');
+    assert.equal(seen[0].url, 'https://music.amazon.com/config.json?skipToken=false&clientApplication=skyfire');
+    assert.equal(seen[0].options.method, 'POST');
   });
 }
 

@@ -1,5 +1,5 @@
 // Amazon Music Metadata & Download Provider for SpotiFLAC
-// v2.3.9 - Resolves cross-catalog links through Songlink web pages.
+// v2.3.11 - Resolves cross-catalog links through Songlink with CSRF session refresh.
 // Uses reverse-engineered Amazon Music web API (skill.music.a2z.com).
 
 var CONFIG = {
@@ -458,12 +458,12 @@ function initSession(context) {
   if (_session.initialized && _session.baseURL === ctx.musicBaseURL) return;
   _currentContext = ctx;
 
-  // Fetch config.json from Amazon Music to get valid session credentials
+  // POST issues CSRF credentials; GET returns configuration without a token.
   L("info", "[Amazon] Fetching config.json for session...");
   try {
-    var configUrl = ctx.musicBaseURL + "/config.json";
+    var configUrl = ctx.musicBaseURL + "/config.json?skipToken=false&clientApplication=skyfire";
     var res = fetch(configUrl, {
-      method: "GET",
+      method: "POST",
       headers: {
         "User-Agent": getRandomUA(),
         "Accept": "application/json"
@@ -3722,7 +3722,7 @@ function completeGrant() {
 
 registerExtension({
   initialize: function() {
-    L("info", "[Amazon] Extension v2.3.9 init");
+    L("info", "[Amazon] Extension v2.3.11 init");
     initSession();
     return true;
   },
@@ -3806,7 +3806,7 @@ registerExtension({
   },
 
   download: function(trackID, quality, outputPath, onProgress, options) {
-    L("info", "[Amazon] download called:", trackID, quality, "extension: 2.3.9");
+    L("info", "[Amazon] download called:", trackID, quality, "extension: 2.3.11");
 
     // trackID bisa berupa:
     // - ASIN langsung (dari handleUrl/getAlbum flow, atau checkAvailability)
