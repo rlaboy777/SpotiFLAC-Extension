@@ -1,6 +1,6 @@
 // ============================================
 // Apple Music Extension for SpotiFLAC Mobile
-// Version: 1.4.9
+// Version: 1.4.10
 //
 // Uses Apple Music's public catalog API (amp-api)
 // to fetch metadata including ISRC. No login required.
@@ -1210,6 +1210,7 @@ function fetchArtist(artistID) {
       header_image: header.image,
       header_video: header.video,
       header_logo: artistNameArtworkURL(attr),
+      concerts: fetchArtistConcerts(artistID),
       artist_url: attr.url || "",
       external_urls: attr.url || "",
       listeners: 0,
@@ -1225,6 +1226,66 @@ function artistAlbumsNext(artistID, next, currentOffset) {
   var match = /[?&]offset=(\d+)(?:&|$)/.exec(String(next || ""));
   if (!match || Number(match[1]) <= currentOffset) return "";
   return artistID + ":albums:" + match[1];
+}
+
+function parseArtistConcerts(html) {
+  var match = /<script\b[^>]*\bid=["']serialized-server-data["'][^>]*>([\s\S]*?)<\/script>/i.exec(html);
+  if (!match) return [];
+  var payload = JSON.parse(match[1]);
+  var pages = Array.isArray(payload) ? payload : payload.data;
+  if (!Array.isArray(pages)) return [];
+  var concerts = [];
+  var seen = Object.create(null);
+  pages.slice(0, 5).forEach(function (page) {
+    var sections = page && page.data && page.data.sections;
+    if (!Array.isArray(sections)) return;
+    sections.slice(0, 30).forEach(function (section) {
+      if (!section || section.itemKind !== "calendarEventLockup" || !Array.isArray(section.items)) return;
+      section.items.slice(0, 500).forEach(function (item) {
+        if (!item || item.isDisabled || concerts.length >= 500) return;
+        var descriptor = item.contentDescriptor || {};
+        if (descriptor.kind !== "concert") return;
+        var id = descriptor.identifiers && descriptor.identifiers.storeAdamID;
+        var date = item.artwork && item.artwork.date;
+        if (typeof id !== "string" || !id || seen[id] ||
+            typeof date !== "string" || !Number.isFinite(Date.parse(date))) return;
+        var location = typeof item.title === "string" ? item.title.trim() : "";
+        if (!location) return;
+        var details = typeof item.subtitle === "string" ? item.subtitle.split("·") : [];
+        var url = typeof descriptor.url === "string" &&
+          /^https:\/\/music\.apple\.com\/[a-z]{2}\/concerts\/ce\.[a-z0-9-]+$/i.test(descriptor.url)
+          ? descriptor.url : "";
+        seen[id] = true;
+        concerts.push({
+          id: id,
+          location: location,
+          venue: (details[0] || "").trim(),
+          start_at: date,
+          time_zone: typeof item.artwork.timeZone === "string" ? item.artwork.timeZone : "",
+          url: url
+        });
+      });
+    });
+  });
+  concerts.sort(function (a, b) { return Date.parse(a.start_at) - Date.parse(b.start_at); });
+  return concerts;
+}
+
+function fetchArtistConcerts(artistID) {
+  if (!/^\d+$/.test(artistID) || operationCancelled()) return [];
+  try {
+    var storefront = /^[a-z]{2}$/i.test(state.storefront) ? state.storefront.toLowerCase() : "us";
+    var response = http.get("https://music.apple.com/" + storefront + "/concerts/artist/" + artistID, {
+      "User-Agent": utils.randomUserAgent(),
+      "Accept": "text/html"
+    });
+    if (!response || response.error || response.statusCode !== 200) return [];
+    return parseArtistConcerts(response.body);
+  } catch (error) {
+    // Concerts are optional: an unavailable schedule must not hide the discography.
+    log.warn("Artist concerts unavailable:", error.message || String(error));
+    return [];
+  }
 }
 
 function formatArtistAlbums(items, artistID, artistAttributes) {

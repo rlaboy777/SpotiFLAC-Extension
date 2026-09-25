@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-23T00:00:00Z",
+  "updated_at": "2026-09-25T00:00:00Z",
   "extensions": [
     {
       "id": "spotify-web",
@@ -45,10 +45,10 @@
       "id": "apple-music",
       "name": "apple-music",
       "display_name": "Apple Music",
-      "version": "1.4.9",
+      "version": "1.4.10",
       "description": "Apple Music metadata and lyrics provider for SpotiFLAC Mobile with guarded track matching, bounded caching, resilient requests, and complete release metadata.",
       "download_url": "https://raw.githubusercontent.com/zarzet/SpotiFLAC-Extension/main/extensions/apple-music.sflx",
-      "sha256": "c52dedbbe0f105be5bfe7cbe517c9b24348e7700cf11d055d4242fe42a599209",
+      "sha256": "b3c9545f48559fe48af43f73fa5dfd428d584a4155c3f81e1582cfa61d34f6fd",
       "category": "integration",
       "tags": [
         "apple",
@@ -57,7 +57,7 @@
         "search"
       ],
       "downloads": 0,
-      "updated_at": "2026-09-21T00:00:00Z",
+      "updated_at": "2026-09-25T00:00:00Z",
       "min_app_version": "4.2.3"
     },
     {
