@@ -47,6 +47,7 @@ test('public concert page yields generic venue, date, zone, and event links', ()
     id: 'ce.123', location: 'Example City', venue: 'Example Hall',
     start_at: '2026-10-07T01:00:00Z', time_zone: 'America/New_York',
     url: 'https://music.apple.com/us/concerts/ce.123',
+    detail_id: 'ce.123',
   });
   assert.deepEqual(calls, ['https://music.apple.com/us/concerts/artist/123']);
   context.getArtist('123');
@@ -101,4 +102,55 @@ test('album pagination never fetches concerts again', () => {
   context.apiGet = () => ({ data: [] });
   context.getArtist('123:albums:100');
   assert.equal(calls.length, 0);
+});
+
+function detailPage(id = 'ce.123', ticket = 'https://example.com/tickets/1') {
+  return `<script id="serialized-server-data">${JSON.stringify({ data: [{ data: {
+    shareUrl: `https://music.apple.com/us/concerts/${id}`,
+    sections: [
+      { id, itemKind: 'concertDetailHeaderLockup', items: [{
+        titleLink: { title: 'Example Artist' },
+        artwork: { dictionary: { url: 'https://example.com/{w}x{h}.{f}' } },
+        accessoryCalendarArtwork: { date: '2026-10-07T01:00:00Z', timeZone: 'America/New_York' },
+      }] },
+      { itemKind: 'concertDetailButtonSection', items: [{ leadingButton: {
+        link: { segue: { $kind: 'openExternalURLAction', url: ticket } },
+      } }] },
+      { itemKind: 'concertDetailList', items: [{ attributedFooterText: 'Powered by Example Events', items: [
+        { segue: { $kind: 'addToCalendarAction', startDate: '2026-10-07T01:00:00Z',
+          endDate: '2026-10-07T04:00:00Z', eventName: 'Example Tour',
+          locationName: 'Example Hall', address: '123 Example Street' } },
+        { symbolArtwork: { name: 'mappin.and.ellipse' },
+          segue: { $kind: 'openExternalURLAction', url: 'https://example.com/map' } },
+      ] }] },
+      { itemKind: 'concertDetailReleaseLockup', items: [{
+        title: 'Example Tour Set List', artwork: { dictionary: { url: 'https://example.com/list/{w}x{h}.{f}' } },
+        contentDescriptor: { kind: 'playlist', identifiers: { storeAdamID: 'pl.example' } },
+      }] },
+    ],
+  } }] })}</script>`;
+}
+
+test('concert detail yields native-page metadata, real ticket links, and a set list', () => {
+  const { context, calls } = runtime({ statusCode: 200, body: detailPage() });
+  const detail = context.getConcert('ce.123');
+  assert.equal(detail.artist_name, 'Example Artist');
+  assert.equal(detail.cover_url, 'https://example.com/900x900.jpg');
+  assert.equal(detail.ticket_url, 'https://example.com/tickets/1');
+  assert.equal(detail.address, '123 Example Street');
+  assert.equal(detail.end_at, '2026-10-07T04:00:00Z');
+  assert.equal(detail.map_url, 'https://example.com/map');
+  assert.equal(detail.set_list.id, 'pl.example');
+  assert.equal(detail.set_list.cover_url, 'https://example.com/list/500x500.jpg');
+  context.getConcert('ce.123');
+  assert.deepEqual(calls, ['https://music.apple.com/us/concerts/ce.123']);
+});
+
+test('invalid concert IDs, mismatched headers, and unsafe links are rejected', () => {
+  const { context, calls } = runtime({ statusCode: 200, body: detailPage() });
+  assert.equal(context.getConcert('../artist/123'), null);
+  assert.equal(calls.length, 0);
+  assert.equal(context.parseConcertDetail(detailPage(), 'ce.other'), null);
+  assert.equal(context.parseConcertDetail('<html></html>', 'ce.123'), null);
+  assert.equal(context.parseConcertDetail(detailPage('ce.123', 'javascript:alert(1)'), 'ce.123').ticket_url, '');
 });

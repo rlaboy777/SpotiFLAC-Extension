@@ -1262,6 +1262,7 @@ function parseArtistConcerts(html) {
           venue: (details[0] || "").trim(),
           start_at: date,
           time_zone: typeof item.artwork.timeZone === "string" ? item.artwork.timeZone : "",
+          detail_id: url ? id : "",
           url: url
         });
       });
@@ -1286,6 +1287,83 @@ function fetchArtistConcerts(artistID) {
     log.warn("Artist concerts unavailable:", error.message || String(error));
     return [];
   }
+}
+
+function parseConcertDetail(html, id) {
+  var match = /<script\b[^>]*\bid=["']serialized-server-data["'][^>]*>([\s\S]*?)<\/script>/i.exec(html);
+  if (!match) return null;
+  var payload = JSON.parse(match[1]);
+  var pages = Array.isArray(payload) ? payload : payload.data;
+  if (!Array.isArray(pages)) return null;
+  var result = { id: id };
+  var found = false;
+  function link(value) {
+    return typeof value === "string" && /^https?:\/\/[^\s]+$/i.test(value) ? value : "";
+  }
+  pages.slice(0, 5).forEach(function (page) {
+    var data = page && page.data;
+    if (!data || !Array.isArray(data.sections)) return;
+    data.sections.slice(0, 30).forEach(function (section) {
+      var item = section && Array.isArray(section.items) && section.items[0];
+      if (!item) return;
+      if (section.itemKind === "concertDetailHeaderLockup" && section.id === id) {
+        found = true;
+        result.url = link(data.shareUrl || data.canonicalURL);
+        result.artist_name = item.titleLink && item.titleLink.title || "";
+        result.cover_url = artworkURL(item.artwork && item.artwork.dictionary, 900).replace("{f}", "jpg");
+        var calendar = item.accessoryCalendarArtwork || {};
+        result.start_at = calendar.date || "";
+        result.time_zone = calendar.timeZone || "";
+      } else if (section.itemKind === "concertDetailButtonSection") {
+        var leading = item.leadingButton && item.leadingButton.link;
+        var segue = leading && leading.segue;
+        if (segue && segue.$kind === "openExternalURLAction") result.ticket_url = link(segue.url);
+      } else if (section.itemKind === "concertDetailList") {
+        result.attribution = typeof item.attributedFooterText === "string" ? item.attributedFooterText : "";
+        (Array.isArray(item.items) ? item.items : []).slice(0, 10).forEach(function (row) {
+          var action = row && row.segue;
+          if (!action) return;
+          if (action.$kind === "addToCalendarAction") {
+            result.title = action.eventName || "";
+            result.start_at = action.startDate || result.start_at;
+            result.end_at = action.endDate || "";
+            result.venue = action.locationName || "";
+            result.address = action.address || "";
+          } else if (action.$kind === "openExternalURLAction" && row.symbolArtwork &&
+              row.symbolArtwork.name === "mappin.and.ellipse") {
+            result.map_url = link(action.url);
+          }
+        });
+      } else if (section.itemKind === "concertDetailReleaseLockup") {
+        var descriptor = item.contentDescriptor || {};
+        var playlistID = descriptor.identifiers && descriptor.identifiers.storeAdamID;
+        if (descriptor.kind === "playlist" && typeof playlistID === "string" && playlistID) {
+          result.set_list = {
+            id: playlistID,
+            name: typeof item.title === "string" ? item.title : "",
+            cover_url: artworkURL(item.artwork && item.artwork.dictionary, 500).replace("{f}", "jpg"),
+            url: link(descriptor.url)
+          };
+        }
+      }
+    });
+  });
+  return found ? result : null;
+}
+
+function getConcert(id) {
+  if (!/^ce\.[a-z0-9-]+$/i.test(id) || operationCancelled()) return null;
+  var key = scopedCacheKey("concert", id);
+  var cached = cacheGet(key);
+  if (cached) return cached;
+  var storefront = /^[a-z]{2}$/i.test(state.storefront) ? state.storefront.toLowerCase() : "us";
+  var response = http.get("https://music.apple.com/" + storefront + "/concerts/" + id, {
+    "User-Agent": utils.randomUserAgent(), "Accept": "text/html"
+  });
+  if (!response || response.error || response.statusCode !== 200 ||
+      typeof response.body !== "string" || response.body.length > 8 * 1024 * 1024) return null;
+  var detail = parseConcertDetail(response.body, id);
+  return detail ? cacheSet(key, detail, METADATA_CACHE_TTL_MS) : null;
 }
 
 function formatArtistAlbums(items, artistID, artistAttributes) {
@@ -2609,6 +2687,7 @@ registerExtension({
   getTrack: getTrack,
   getAlbum: getAlbum,
   getArtist: getArtist,
+  getConcert: getConcert,
   getPlaylist: getPlaylist,
   getHomeFeed: getHomeFeed,
   searchTracks: searchTracks,
